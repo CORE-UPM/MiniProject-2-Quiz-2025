@@ -6,12 +6,16 @@ const {models} = require("../models");
 exports.load = async (req, res, next, quizId) => {
 
     try {
-        const quiz = await models.Quiz.findByPk(quizId);
+        const quiz = await models.Quiz.findByPk(quizId, {
+            include: [
+                {model: models.Attachment, as: 'attachment'}
+            ]
+        });
         if (quiz) {
             req.load = {...req.load, quiz};
             next();
         } else {
-            throw createError(404,'There is no quiz with id=' + quizId);
+            throw createError(404, 'There is no quiz with id=' + quizId);
         }
     } catch (error) {
         next(error);
@@ -22,7 +26,12 @@ exports.load = async (req, res, next, quizId) => {
 exports.index = async (req, res, next) => {
 
     try {
-        const quizzes = await models.Quiz.findAll();
+        const findOptions = {
+            include: [
+                {model: models.Attachment, as: 'attachment'}
+            ]
+        };
+        const quizzes = await models.Quiz.findAll(findOptions);
         res.render('quizzes/index.ejs', {quizzes});
     } catch (error) {
         next(error);
@@ -63,7 +72,26 @@ exports.create = async (req, res, next) => {
         });
 
         quiz = await quiz.save();
-        res.redirect('/quizzes/' + quiz.id);
+        console.log('Success: Quiz created successfully.');
+
+        try {
+            if (!req.file) {
+                console.log('Info: Quiz without attachment.');
+                return;
+            }
+
+            // Create the quiz attachment
+            const attachment = await models.Attachment.create({
+                mime: req.file.mimetype,
+                image: req.file.buffer
+            });
+            await quiz.setAttachment(attachment);
+            console.log('Success: Attachment saved successfully.');
+        } catch (error) {
+            console.log('Error: Failed to create attachment: ' + error.message);
+        } finally {
+            res.redirect('/quizzes/' + quiz.id);
+        }
     } catch (error) {
         if (error instanceof (Sequelize.ValidationError)) {
             console.log('There are errors in the form:');
@@ -74,7 +102,6 @@ exports.create = async (req, res, next) => {
         }
     }
 };
-
 
 // GET /quizzes/:quizId/edit
 exports.edit = (req, res, next) => {
@@ -95,7 +122,29 @@ exports.update = async (req, res, next) => {
 
     try {
         await quiz.save();
-        res.redirect('/quizzes/' + quiz.id);
+        console.log('Success: Quiz edited successfully.');
+
+        try {
+            if (!req.file) {
+                console.log('Info: Quiz attachment not changed.');
+                return;
+            }
+
+            // Delete old attachment:
+            await quiz.attachment?.destroy();
+
+            // Create the new attachment:
+            const attachment = await models.Attachment.create({
+                mime: req.file.mimetype,
+                image: req.file.buffer
+            });
+            await quiz.setAttachment(attachment);
+            console.log('Success: Attachment saved successfully.');
+        } catch (error) {
+            console.log('Error: Failed saving the new attachment: ' + error.message);
+        } finally {
+            res.redirect('/quizzes/' + quiz.id);
+        }
     } catch (error) {
         if (error instanceof (Sequelize.ValidationError)) {
             console.log('There are errors in the form:');
@@ -111,10 +160,16 @@ exports.update = async (req, res, next) => {
 // DELETE /quizzes/:quizId
 exports.destroy = async (req, res, next) => {
 
+    const attachment = req.load.quiz.attachment;
+
     try {
         await req.load.quiz.destroy();
+        await attachment?.destroy();
+        console.log('Success: Quiz deleted successfully.');
         res.redirect('/quizzes');
     } catch (error) {
+        console.log('Error: Error deleting the Quiz: ' + error.message);
+
         next(error);
     }
 };
@@ -148,3 +203,21 @@ exports.check = async (req, res, next) => {
         answer
     });
 };
+
+
+// GET /quizzes/:quizId/attachment
+exports.attachment = (req, res, next) => {
+
+    const {quiz} = req.load;
+
+    const {attachment} = quiz;
+
+    if (!attachment) {
+        res.redirect("/images/none.png");
+    } else if (attachment.image) {
+        res.type(attachment.mime);
+        res.send(attachment.image);
+    } else {
+        res.redirect("/images/none.png");
+    }
+}
