@@ -4,6 +4,9 @@ var router = express.Router();
 const quizController = require('../controllers/quiz');
 
 
+// Autoload for routes using :quizId
+router.param('quizId', quizController.load);
+
 // Routes for the resource /quizzes
 router.get('/',                    quizController.index);
 router.get('/:quizId(\\d+)',       quizController.show);
